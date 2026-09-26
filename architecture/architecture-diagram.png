@@ -1,0 +1,24 @@
+User / Browser
+      │
+      │ HTTPS
+      ▼
+   Route 53
+      │
+      ▼
+  CloudFront
+  + ACM HTTPS
+      │
+      │ OAC
+      ▼
+ Private S3
+      │
+      │ Object Upload / Update
+      ▼
+S3 Event Notification
+      │
+      ▼
+    Lambda
+      │
+      │ CreateInvalidation
+      ▼
+  CloudFront
