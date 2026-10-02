@@ -1,14 +1,8 @@
-# AWS Serverless Static Website with CloudFront & Lambda
+# AWS Serverless Static Website Architecture
 
-## Project Overview
+A secure, highly available, and globally distributed static website architecture built using Amazon S3, Amazon CloudFront, Route 53, AWS Certificate Manager (ACM), AWS WAF, AWS Lambda, IAM, and CloudWatch.
 
-This project demonstrates the deployment of a secure serverless static website on AWS using Amazon S3, Amazon CloudFront, Route 53, AWS Certificate Manager (ACM), and AWS Lambda.
-
-The website content is stored in a private S3 bucket and delivered through CloudFront. Origin Access Control (OAC) is used to securely allow CloudFront to access the S3 bucket.
-
-A custom domain is configured using Route 53, and an ACM certificate provides HTTPS encryption.
-
-AWS Lambda is integrated with S3 Event Notifications to automatically create a CloudFront cache invalidation whenever website content is updated.
+The solution keeps the S3 origin private, serves content through CloudFront over HTTPS, protects incoming requests with AWS WAF, and automatically invalidates the CloudFront cache when website content is updated in S3.
 
 ---
 
@@ -18,115 +12,219 @@ AWS Lambda is integrated with S3 Event Notifications to automatically create a C
 
 ### Request Flow
 
-User / Browser  
-↓  
-Route 53  
-↓  
-CloudFront + ACM  
-↓  
-Origin Access Control (OAC)  
-↓  
-Private Amazon S3 Bucket
+```text
+User
+  ↓
+Route 53
+  ↓
+AWS WAF
+  ↓
+CloudFront + ACM
+  ↓
+Origin Access Control (OAC)
+  ↓
+Private Amazon S3
+```
 
-### Content Update Flow
+### Automated Content Update Flow
 
-S3 Object Upload / Update  
-↓  
-S3 Event Notification  
-↓  
-AWS Lambda  
-↓  
-CloudFront CreateInvalidation API  
-↓  
-Updated content delivered to users
+```text
+S3 Object Update
+      ↓
+S3 Event Notification
+      ↓
+AWS Lambda
+      ↓
+CloudFront CreateInvalidation
+      ↓
+Updated Content Delivered
+```
 
 ---
 
 ## AWS Services Used
 
-- Amazon S3
-- Amazon CloudFront
-- Amazon Route 53
-- AWS Certificate Manager (ACM)
-- AWS Lambda
-- AWS Identity and Access Management (IAM)
+| Service                 | Purpose                                         |
+| ----------------------- | ----------------------------------------------- |
+| Amazon S3               | Stores static website files                     |
+| Amazon CloudFront       | Global CDN and content delivery                 |
+| Origin Access Control   | Provides secure CloudFront access to private S3 |
+| Route 53                | DNS and custom domain routing                   |
+| AWS Certificate Manager | TLS certificate for HTTPS                       |
+| AWS WAF                 | Application-layer request filtering             |
+| AWS Lambda              | Automates CloudFront cache invalidation         |
+| AWS IAM                 | Least-privilege Lambda permissions              |
+| Amazon CloudWatch       | Lambda execution logging                        |
 
 ---
 
-## Implementation
+## Security Design
 
-### Phase 1 – Amazon S3
+The architecture implements multiple security controls:
 
-- Created an S3 bucket for website files.
-- Uploaded the static website content.
-- Enabled S3 Versioning.
-- Kept the S3 bucket private.
+- S3 Block Public Access enabled
+- Private S3 origin
+- CloudFront Origin Access Control (OAC)
+- HTTPS using ACM
+- AWS WAF associated with CloudFront
+- AWS Managed WAF rule groups
+- Distribution-specific `cloudfront:CreateInvalidation` permission
+- CloudWatch logging for Lambda execution
 
-### Phase 2 – CloudFront & OAC
-
-- Created a CloudFront distribution.
-- Configured the S3 bucket as the CloudFront origin.
-- Configured Origin Access Control (OAC).
-- Added the required S3 bucket policy for CloudFront access.
-- Configured `index.html` as the default root object.
-
-### Phase 3 – ACM & Route 53
-
-- Requested an SSL/TLS certificate using AWS Certificate Manager.
-- Validated the certificate using DNS validation.
-- Associated the ACM certificate with the CloudFront distribution.
-- Configured the custom domain.
-- Created a Route 53 Alias record pointing to CloudFront.
-- Verified HTTPS access to the website.
-
-### Phase 4 – Automated CloudFront Cache Invalidation
-
-- Created an AWS Lambda function using Python and Boto3.
-- Configured an S3 Event Notification to invoke Lambda when website files are updated.
-- Granted Lambda permission to call `cloudfront:CreateInvalidation`.
-- Configured Lambda to invalidate `/*`.
-- Verified successful CloudFront invalidation after S3 content updates.
-- 
-### Phase 5 – AWS WAF Security
-
-- Created an AWS WAF Web ACL.
-- Configured security rules.
-- Associated the Web ACL with the CloudFront distribution.
-- Tested WAF protection.
----
-
-## IAM Configuration
-
-The Lambda execution role follows least-privilege principles by allowing the function to create invalidations for the required CloudFront distribution.
-
-Example policy:
-
-`iam/lambda-cloudfront-policy.json`
+The S3 bucket is not directly exposed to internet users. Website traffic is delivered through CloudFront.
 
 ---
 
-## Testing
+## AWS WAF Protection
 
-The following functionality was tested:
+The CloudFront distribution is protected using AWS WAF with the following AWS Managed Rule Groups:
 
-- Website accessibility through the custom domain
-- HTTPS certificate
-- CloudFront distribution
-- Private S3 access through CloudFront
-- S3 object updates
-- Lambda invocation
-- Automatic CloudFront invalidation
-- Updated website content after cache invalidation
+- `AWSManagedRulesAmazonIpReputationList`
+- `AWSManagedRulesCommonRuleSet`
+- `AWSManagedRulesKnownBadInputsRuleSet`
+
+These rules provide protection against common web attack patterns, known malicious inputs, and IP addresses associated with malicious activity.
+
+> AWS WAF request logging was not enabled in this implementation.
+
+Detailed WAF configuration is available in [`waf/README.md`](waf/README.md).
 
 ---
 
-## Troubleshooting
+## Automated CloudFront Cache Invalidation
 
-During implementation, the Lambda function initially received an `AccessDenied` error when calling the CloudFront `CreateInvalidation` API.
+Website updates are automated using an event-driven workflow.
 
-The issue was resolved by adding the required `cloudfront:CreateInvalidation` permission to the Lambda execution role.
+When an object is created or updated in the S3 bucket:
 
-This demonstrated the importance of configuring appropriate IAM permissions when integrating AWS services.
+1. S3 generates an `ObjectCreated` event.
+2. The S3 Event Notification invokes Lambda.
+3. Lambda calls the CloudFront `CreateInvalidation` API.
+4. CloudFront invalidates `/*`.
+5. Updated website content is retrieved from the S3 origin.
+
+This removes the need to manually create CloudFront invalidations after website updates.
+
+---
+
+## Lambda Configuration
+
+The Lambda function uses Python and `boto3` to create CloudFront invalidations.
+
+For repository portability, the CloudFront distribution ID is configured using:
+
+```text
+CLOUDFRONT_DISTRIBUTION_ID
+```
+
+as a Lambda environment variable.
+
+The deployed lab implementation initially used the distribution ID directly in the function code; the repository version externalizes this configuration to make the function easier to reuse across environments.
+
+---
+
+## IAM Design
+
+The Lambda execution role uses:
+
+- `AWSLambdaBasicExecutionRole` for CloudWatch Logs
+- A custom least-privilege policy allowing:
+
+```text
+cloudfront:CreateInvalidation
+```
+
+only against the required CloudFront distribution.
+
+See:
+
+[`iam/lambda-cloudfront-policy.json`](iam/lambda-cloudfront-policy.json)
+
+---
+
+## Implementation Phases
+
+### Phase 1 — Storage
+
+- Created S3 bucket
+- Enabled S3 Versioning
+- Enabled Block Public Access
+- Uploaded static website content
+
+### Phase 2 — Content Delivery
+
+- Created CloudFront distribution
+- Configured private S3 origin
+- Configured Origin Access Control
+- Updated S3 bucket policy
+- Configured `index.html` as the default root object
+
+### Phase 3 — HTTPS & DNS
+
+- Requested ACM certificate in `us-east-1`
+- Completed DNS validation through Route 53
+- Associated certificate with CloudFront
+- Configured custom domain
+- Created Route 53 Alias record
+
+### Phase 4 — Web Security
+
+- Created AWS WAF Web ACL
+- Associated WAF with CloudFront
+- Configured AWS Managed Rule Groups
+
+### Phase 5 — Event-Driven Automation
+
+- Created Lambda execution role
+- Implemented CloudFront invalidation function
+- Configured S3 Event Notification
+- Connected S3 directly to Lambda
+- Automatically invalidated CloudFront after object updates
+
+### Phase 6 — Validation
+
+- Verified HTTPS website access
+- Tested Lambda manually
+- Verified CloudFront invalidation
+- Updated website content in S3
+- Verified automatic Lambda invocation
+- Confirmed updated content through CloudFront
+
+---
+
+## Implementation Evidence
+
+The repository contains **26 screenshots** documenting the implementation and validation process.
+
+Examples:
+
+### Private S3 Origin
+
+![Private S3](screenshots/03-s3-private-access.png)
+
+### CloudFront Origin Access Control
+
+![CloudFront OAC](screenshots/07-cloudfront-oac.png)
+
+### AWS WAF Managed Rules
+
+![AWS WAF](screenshots/16-waf-managed-rules.png)
+
+### Lambda CloudFront Invalidation
+
+![Lambda](screenshots/20-lambda-cloudfront-invalidation-code.png)
+
+### Automatic S3-Triggered Invalidation
+
+![Automatic Invalidation](screenshots/25-s3-triggered-cloudfront-invalidation.png)
+
+### Final Website Validation
+
+![Website](screenshots/26-website-updated-after-invalidation.png)
+
+For the complete deployment sequence, see the:
+
+**[Implementation Guide](docs/implementation-guide.md)**
 
 ---
 
@@ -134,46 +232,80 @@ This demonstrated the importance of configuring appropriate IAM permissions when
 
 ```text
 aws-serverless-static-website/
-├── README.md
+│
 ├── architecture/
 │   └── architecture-diagram.png
-├── website/
-│   └── index.html
-├── lambda/
-│   └── cloudfront_invalidation.py
+│
+├── docs/
+│   └── implementation-guide.md
+│
 ├── iam/
 │   └── lambda-cloudfront-policy.json
+│
+├── lambda/
+│   └── cloudfront_invalidation.py
+│
 ├── screenshots/
-└── docs/
-    └── implementation-guide.md
+│   ├── 01-s3-bucket.png
+│   ├── ...
+│   └── 26-website-updated-after-invalidation.png
+│
+├── waf/
+│   └── README.md
+│
+├── website/
+│   └── index.html
+│
+└── README.md
+```
 
-## Security Considerations
+---
 
-- Amazon S3 bucket is kept private and is not directly accessible from the internet.
-- CloudFront securely accesses the S3 bucket using Origin Access Control (OAC).
-- HTTPS is enabled using an SSL/TLS certificate from AWS Certificate Manager (ACM).
-- IAM permissions are restricted to the actions required by the Lambda function.
-- AWS credentials, access keys, secret keys, and other sensitive information are not stored in this repository.
-- Website content is delivered to users through CloudFront instead of direct S3 access.
+## Troubleshooting & Engineering Decisions
+
+### Private S3 Access
+
+Instead of making the S3 bucket publicly accessible, CloudFront Origin Access Control was used to securely retrieve objects from the private bucket.
+
+### ACM Certificate Validation
+
+The ACM certificate required DNS validation through Route 53 before it could be associated with the CloudFront distribution.
+
+### CloudFront Cached Content
+
+Website changes may not immediately appear because CloudFront can continue serving cached objects.
+
+This was addressed by implementing automatic CloudFront invalidation using S3 Event Notifications and Lambda.
+
+### Lambda Authorization
+
+The Lambda function requires `cloudfront:CreateInvalidation`. The permission was restricted to the required CloudFront distribution instead of granting broad CloudFront permissions.
+
+### EventBridge
+
+EventBridge is not required for this implementation. S3 invokes Lambda directly using an S3 Event Notification.
 
 ---
 
 ## Future Enhancements
 
-- Integrate AWS WAF with CloudFront for additional web application security.
-- Add Amazon CloudWatch monitoring, logs, and alarms.
-- Implement a CI/CD pipeline for automated website deployment.
-- Manage the AWS infrastructure using Terraform (Infrastructure as Code).
-- Add additional security monitoring and alerting.
+Potential production enhancements include:
+
+- Infrastructure as Code using Terraform
+- CI/CD deployment through GitHub Actions
+- Separate development, staging, and production environments
+- AWS WAF logging and centralized security monitoring
+- CloudFront access logging
+- S3 lifecycle policies
+- CloudWatch alarms and operational dashboards
+- Automated security and deployment validation
 
 ---
 
-## Project Outcome
+## Outcome
 
-This project successfully demonstrates the deployment of a secure serverless static website on AWS using Amazon S3, CloudFront, Route 53, AWS Certificate Manager (ACM), IAM, and AWS Lambda.
+This project demonstrates a secure AWS static website architecture with:
 
-The website content is stored in a private S3 bucket and securely delivered through CloudFront using Origin Access Control (OAC) and HTTPS.
+**Private S3 + CloudFront + OAC + Route 53 + ACM + AWS WAF + Lambda + IAM + CloudWatch**
 
-S3 Event Notifications trigger an AWS Lambda function whenever website content is updated. The Lambda function automatically creates a CloudFront cache invalidation, allowing updated content to be delivered without manually creating an invalidation.
-
-The project demonstrates practical experience with AWS serverless architecture, content delivery, DNS configuration, SSL/TLS, IAM permissions, event-driven automation, and troubleshooting.
+It also demonstrates an event-driven content deployment workflow where S3 updates automatically trigger CloudFront cache invalidation.

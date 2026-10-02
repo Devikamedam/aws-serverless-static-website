@@ -2,11 +2,10 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "AllowCloudFrontInvalidation",
       "Effect": "Allow",
-      "Action": [
-        "cloudfront:CreateInvalidation"
-      ],
-      "Resource": "arn:aws:cloudfront::<AWS_ACCOUNT_ID>:distribution/<DISTRIBUTION_ID>"
+      "Action": "cloudfront:CreateInvalidation",
+      "Resource": "arn:aws:cloudfront::486560520937:distribution/E23Y7DQX9PXSA5"
     }
   ]
 }

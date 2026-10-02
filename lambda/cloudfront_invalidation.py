@@ -1,21 +1,14 @@
 import boto3
-import json
 import os
-from datetime import datetime, timezone
+import time
 
-# Initialize CloudFront client
 cloudfront = boto3.client("cloudfront")
 
-# Get CloudFront Distribution ID from Lambda environment variable
-DISTRIBUTION_ID = os.environ["CLOUDFRONT_DISTRIBUTION_ID"]   #give your cloudfront ID
+# CloudFront distribution ID is supplied through a Lambda environment variable.
+DISTRIBUTION_ID = os.environ["CLOUDFRONT_DISTRIBUTION_ID"]
 
 
 def lambda_handler(event, context):
-    """
-    Creates a CloudFront invalidation when the Lambda function
-    is triggered by an S3 object upload or update.
-    """
-
     try:
         response = cloudfront.create_invalidation(
             DistributionId=DISTRIBUTION_ID,
@@ -24,35 +17,22 @@ def lambda_handler(event, context):
                     "Quantity": 1,
                     "Items": ["/*"]
                 },
-                "CallerReference": str(
-                    datetime.now(timezone.utc).timestamp()
-                )
+                "CallerReference": str(time.time())
             }
         )
 
-        invalidation = response["Invalidation"]
+        invalidation_id = response["Invalidation"]["Id"]
 
         print(
             f"CloudFront invalidation created successfully: "
-            f"{invalidation['Id']}"
+            f"{invalidation_id}"
         )
 
         return {
             "statusCode": 200,
-            "body": json.dumps({
-                "message": "CloudFront invalidation created successfully",
-                "invalidation_id": invalidation["Id"],
-                "status": invalidation["Status"]
-            })
+            "body": f"Invalidation created: {invalidation_id}"
         }
 
-    except Exception as error:
-        print(f"Error creating CloudFront invalidation: {error}")
-
-        return {
-            "statusCode": 500,
-            "body": json.dumps({
-                "message": "Failed to create CloudFront invalidation",
-                "error": str(error)
-            })
-        }
+    except Exception as e:
+        print(f"Error creating invalidation: {str(e)}")
+        raise
